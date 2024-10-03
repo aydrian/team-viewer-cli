@@ -1,33 +1,29 @@
-use crate::config::get_config_path;
-use std::path::PathBuf;
+use team_viewer::config::Config;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[test]
+fn test_new_config() {
+    let user_city = "New York".to_string();
+    let config = Config::new(user_city.clone());
+
+    assert_eq!(config.user_city, user_city);
+    assert!(config.coworkers.is_empty());
 }
 #[test]
-fn test_get_config_path_valid() {
-    let result = get_config_path();
+fn test_add_valid_coworker() {
+    let mut config = Config::new("New York".to_string());
+    let result = config.add_coworker("John Doe".to_string(), "London".to_string());
+
     assert!(result.is_ok());
-    let path = result.unwrap();
-    assert!(path.is_absolute());
-    assert_eq!(path.file_name().unwrap(), ".team_view_config.json");
-    assert!(path.parent().unwrap() == dirs::home_dir().unwrap());
+    assert_eq!(config.coworkers.len(), 1);
+    assert_eq!(config.coworkers[0].name, "John Doe");
+    assert_eq!(config.coworkers[0].city, "London");
 }
 #[test]
-fn test_get_config_path_no_home_dir() {
-    // Mock the dirs::home_dir() function to return None
-    let original_home_dir = dirs::home_dir;
-    dirs::home_dir = || None;
+fn test_get_config_path() {
+    let home_dir = dirs::home_dir().unwrap();
+    let expected_path = home_dir.join(".team_view_config.json");
 
-    let result = get_config_path();
-
-    // Restore the original dirs::home_dir function
-    dirs::home_dir = original_home_dir;
-
-    assert!(result.is_err());
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "Unable to determine home directory"
-    );
+    let result = Config::get_config_path();
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), expected_path);
 }

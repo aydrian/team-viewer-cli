@@ -1,136 +1,39 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use dotenv::dotenv;
-use std::env;
-mod weather_api;
-use chrono;
-use weather_api::get_weather;
-mod config;
-
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    #[arg(short, long)]
-    city: Option<String>,
-
-    #[command(subcommand)]
-    command: Option<Command>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Command {
-    AddCoworker {
-        #[arg(short, long)]
-        first_name: String,
-        #[arg(short, long)]
-        last_name: String,
-        #[arg(short, long)]
-        city: String,
-    },
-}
+use team_viewer::cli::{Cli, Commands};
+use team_viewer::commands::{
+    add_coworker, get_api_key, list_coworkers, print_coworkers_weather, print_weather,
+    remove_coworker,
+};
+use team_viewer::config::Config;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
-    let args = Args::parse();
-    let config_path = config::get_config_path()?;
-    let mut config = config::read_config(&config_path)?;
+    let cli = Cli::parse();
 
-    if let Some(command) = args.command {
-        return handle_command(command, &config_path, &mut config);
-    }
-
-    let user_city = get_user_city(&args, &mut config, &config_path)?;
-    let api_key = get_api_key()?;
-
-    println!("Your weather:");
-    print_weather(&user_city, &api_key).await?;
-
-    print_coworkers_weather(&config, &api_key).await?;
-
-    Ok(())
-}
-
-fn handle_command(
-    command: Command,
-    config_path: &std::path::Path,
-    config: &mut config::Config,
-) -> Result<(), Box<dyn std::error::Error>> {
-    match command {
-        Command::AddCoworker {
-            first_name,
-            last_name,
-            city,
-        } => {
-            config.add_coworker(first_name.clone(), last_name.clone(), city.clone());
-            config::write_config(&config_path.to_path_buf(), &config)?;
-            println!("Added coworker: {} {} from {}", first_name, last_name, city);
+    let mut config = match Config::read_config() {
+        Ok(config) => config,
+        Err(_) => {
+            println!("No configuration found. Let's set up a new one.");
+            Config::setup()?
         }
-    }
-    Ok(())
-}
+    };
 
-fn get_user_city(
-    args: &Args,
-    config: &mut config::Config,
-    config_path: &std::path::Path,
-) -> Result<String, Box<dyn std::error::Error>> {
-    Ok(match &args.city {
-        Some(c) => c.clone(),
+    match &cli.command {
+        Some(Commands::Add { name, city }) => add_coworker(name, city, &mut config)?,
+        Some(Commands::Remove { name }) => remove_coworker(name, &mut config)?,
+        Some(Commands::List) => list_coworkers(&config),
         None => {
-            if config.user_city.is_empty() {
-                let mut input = String::new();
-                println!("Enter your city name:");
-                std::io::stdin().read_line(&mut input)?;
-                let city = input.trim().to_string();
-                config.user_city = city.clone();
-                config::write_config(&config_path.to_path_buf(), &config)?;
-                city
-            } else {
-                config.user_city.clone()
-            }
-        }
-    })
-}
+            let user_city = cli.city.unwrap_or_else(|| config.user_city.clone());
+            let api_key = get_api_key()?;
 
-fn get_api_key() -> Result<String, Box<dyn std::error::Error>> {
-    env::var("OPENWEATHERMAP_API_KEY")
-        .map_err(|_| "OPENWEATHERMAP_API_KEY not found in environment variables".into())
-}
+            println!("Your weather:");
+            print_weather(&user_city, &api_key).await?;
 
-async fn print_weather(city: &str, api_key: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let weather = get_weather(city, api_key).await?;
-    let timezone_offset = weather.timezone;
-    let local_time = chrono::Utc::now() + chrono::Duration::seconds(i64::from(timezone_offset));
-
-    println!("Weather in {}: ", city);
-    println!(
-        "Current Date and Time: {}",
-        local_time.format("%Y-%m-%d %H:%M:%S")
-    );
-    println!("Temperature: {}°C", weather.main.temp);
-    println!("Humidity: {}%", weather.main.humidity);
-    println!(
-        "Description: {}",
-        weather
-            .weather
-            .get(0)
-            .map(|w| w.description.as_str())
-            .unwrap_or("No description available")
-    );
-    println!();
-    Ok(())
-}
-
-async fn print_coworkers_weather(
-    config: &config::Config,
-    api_key: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if !config.coworkers.is_empty() {
-        println!("Coworkers' weather:");
-        for coworker in &config.coworkers {
-            println!("{} {}:", coworker.first_name, coworker.last_name);
-            print_weather(&coworker.city, api_key).await?;
+            print_coworkers_weather(&config, &api_key).await?;
         }
     }
+
     Ok(())
 }
